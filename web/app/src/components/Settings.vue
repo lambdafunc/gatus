@@ -1,9 +1,9 @@
 <template>
   <div id="settings" class="flex bg-gray-200 border-gray-300 rounded border shadow dark:text-gray-200 dark:bg-gray-800 dark:border-gray-500">
-    <div class="text-xs text-gray-600 rounded-xl py-1 px-2 dark:text-gray-200">
-      &#x21bb;
+    <div class="text-xs text-gray-600 rounded-xl py-1.5 px-1.5 dark:text-gray-200">
+      <ArrowPathIcon class="w-3"/>
     </div>
-    <select class="text-center text-gray-500 text-xs dark:text-gray-200 dark:bg-gray-800 border-r border-l border-gray-300 dark:border-gray-500" id="refresh-rate" ref="refreshInterval" @change="handleChangeRefreshInterval">
+    <select class="text-center text-gray-500 text-xs dark:text-gray-200 dark:bg-gray-800 border-r border-l border-gray-300 dark:border-gray-500 pl-1" id="refresh-rate" ref="refreshInterval" @change="handleChangeRefreshInterval">
       <option value="10" :selected="refreshInterval === 10">10s</option>
       <option value="30" :selected="refreshInterval === 30">30s</option>
       <option value="60" :selected="refreshInterval === 60">1m</option>
@@ -12,20 +12,28 @@
       <option value="600" :selected="refreshInterval === 600">10m</option>
     </select>
     <button @click="toggleDarkMode" class="text-xs p-1">
-      <slot v-if="darkMode">☀</slot>
-      <slot v-else>🌙</slot>
+      <slot v-if="darkMode"><SunIcon class="w-4"/></slot>
+      <slot v-else><MoonIcon class="w-4 text-gray-500"/></slot>
     </button>
   </div>
 </template>
 
 
 <script>
+import { MoonIcon, SunIcon } from '@heroicons/vue/20/solid'
+import { ArrowPathIcon } from '@heroicons/vue/24/solid'
+
 export default {
   name: 'Settings',
+  components: {
+    ArrowPathIcon,
+    MoonIcon,
+    SunIcon
+  },
   props: {},
   methods: {
     setRefreshInterval(seconds) {
-      sessionStorage.setItem('gatus:refresh-interval', seconds);
+      localStorage.setItem('gatus:refresh-interval', seconds);
       let that = this;
       this.refreshIntervalHandler = setInterval(function () {
         that.refreshData();
@@ -59,7 +67,7 @@ export default {
   },
   created() {
     if (this.refreshInterval !== 10 && this.refreshInterval !== 30 && this.refreshInterval !== 60 && this.refreshInterval !== 120 && this.refreshInterval !== 300 && this.refreshInterval !== 600) {
-      this.refreshInterval = 60;
+      this.refreshInterval = 300;
     }
     this.setRefreshInterval(this.refreshInterval);
     // dark mode
@@ -70,7 +78,7 @@ export default {
   },
   data() {
     return {
-      refreshInterval: sessionStorage.getItem('gatus:refresh-interval') < 10 ? 60 : parseInt(sessionStorage.getItem('gatus:refresh-interval')),
+      refreshInterval: localStorage.getItem('gatus:refresh-interval') < 10 ? 300 : parseInt(localStorage.getItem('gatus:refresh-interval')),
       refreshIntervalHandler: 0,
       darkMode: true
     }

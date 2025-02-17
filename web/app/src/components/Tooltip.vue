@@ -5,12 +5,14 @@
       <code id="tooltip-timestamp">{{ prettifyTimestamp(result.timestamp) }}</code>
       <div class="tooltip-title">Response time:</div>
       <code id="tooltip-response-time">{{ (result.duration / 1000000).toFixed(0) }}ms</code>
-      <div class="tooltip-title">Conditions:</div>
-      <code id="tooltip-conditions">
-        <slot v-for="conditionResult in result.conditionResults" :key="conditionResult">
-          {{ conditionResult.success ? "&#10003;" : "X" }} ~ {{ conditionResult.condition }}<br/>
-        </slot>
-      </code>
+      <slot v-if="result.conditionResults && result.conditionResults.length">
+        <div class="tooltip-title">Conditions:</div>
+        <code id="tooltip-conditions">
+          <slot v-for="conditionResult in result.conditionResults" :key="conditionResult">
+            {{ conditionResult.success ? "&#10003;" : "X" }} ~ {{ conditionResult.condition }}<br/>
+          </slot>
+        </code>
+      </slot>
       <div id="tooltip-errors-container" v-if="result.errors && result.errors.length">
         <div class="tooltip-title">Errors:</div>
         <code id="tooltip-errors">
@@ -25,23 +27,16 @@
 
 
 <script>
+import {helper} from "@/mixins/helper";
+
 export default {
   name: 'Endpoints',
   props: {
     event: Event,
     result: Object
   },
+  mixins: [helper],
   methods: {
-    prettifyTimestamp(timestamp) {
-      let date = new Date(timestamp);
-      let YYYY = date.getFullYear();
-      let MM = ((date.getMonth() + 1) < 10 ? "0" : "") + "" + (date.getMonth() + 1);
-      let DD = ((date.getDate()) < 10 ? "0" : "") + "" + (date.getDate());
-      let hh = ((date.getHours()) < 10 ? "0" : "") + "" + (date.getHours());
-      let mm = ((date.getMinutes()) < 10 ? "0" : "") + "" + (date.getMinutes());
-      let ss = ((date.getSeconds()) < 10 ? "0" : "") + "" + (date.getSeconds());
-      return YYYY + "-" + MM + "-" + DD + " " + hh + ":" + mm + ":" + ss;
-    },
     htmlEntities(s) {
       return String(s)
           .replace(/&/g, '&amp;')

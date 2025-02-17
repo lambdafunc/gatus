@@ -1,37 +1,39 @@
 package store
 
 import (
+	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/TwiN/gatus/v3/core"
-	"github.com/TwiN/gatus/v3/storage"
-	"github.com/TwiN/gatus/v3/storage/store/common"
-	"github.com/TwiN/gatus/v3/storage/store/common/paging"
-	"github.com/TwiN/gatus/v3/storage/store/memory"
-	"github.com/TwiN/gatus/v3/storage/store/sql"
+	"github.com/TwiN/gatus/v5/config/endpoint"
+	"github.com/TwiN/gatus/v5/storage"
+	"github.com/TwiN/gatus/v5/storage/store/common"
+	"github.com/TwiN/gatus/v5/storage/store/common/paging"
+	"github.com/TwiN/gatus/v5/storage/store/memory"
+	"github.com/TwiN/gatus/v5/storage/store/sql"
 )
 
 var (
-	firstCondition  = core.Condition("[STATUS] == 200")
-	secondCondition = core.Condition("[RESPONSE_TIME] < 500")
-	thirdCondition  = core.Condition("[CERTIFICATE_EXPIRATION] < 72h")
+	firstCondition  = endpoint.Condition("[STATUS] == 200")
+	secondCondition = endpoint.Condition("[RESPONSE_TIME] < 500")
+	thirdCondition  = endpoint.Condition("[CERTIFICATE_EXPIRATION] < 72h")
 
 	now = time.Now().Truncate(time.Hour)
 
-	testEndpoint = core.Endpoint{
+	testEndpoint = endpoint.Endpoint{
 		Name:                    "name",
 		Group:                   "group",
 		URL:                     "https://example.org/what/ever",
 		Method:                  "GET",
 		Body:                    "body",
 		Interval:                30 * time.Second,
-		Conditions:              []*core.Condition{&firstCondition, &secondCondition, &thirdCondition},
+		Conditions:              []endpoint.Condition{firstCondition, secondCondition, thirdCondition},
 		Alerts:                  nil,
 		NumberOfFailuresInARow:  0,
 		NumberOfSuccessesInARow: 0,
 	}
-	testSuccessfulResult = core.Result{
+	testSuccessfulResult = endpoint.Result{
 		Timestamp:             now,
 		Success:               true,
 		Hostname:              "example.org",
@@ -41,7 +43,7 @@ var (
 		Connected:             true,
 		Duration:              150 * time.Millisecond,
 		CertificateExpiration: 10 * time.Hour,
-		ConditionResults: []*core.ConditionResult{
+		ConditionResults: []*endpoint.ConditionResult{
 			{
 				Condition: "[STATUS] == 200",
 				Success:   true,
@@ -56,7 +58,7 @@ var (
 			},
 		},
 	}
-	testUnsuccessfulResult = core.Result{
+	testUnsuccessfulResult = endpoint.Result{
 		Timestamp:             now,
 		Success:               false,
 		Hostname:              "example.org",
@@ -66,7 +68,7 @@ var (
 		Connected:             true,
 		Duration:              750 * time.Millisecond,
 		CertificateExpiration: 10 * time.Hour,
-		ConditionResults: []*core.ConditionResult{
+		ConditionResults: []*endpoint.ConditionResult{
 			{
 				Condition: "[STATUS] == 200",
 				Success:   true,
@@ -89,11 +91,15 @@ type Scenario struct {
 }
 
 func initStoresAndBaseScenarios(t *testing.T, testName string) []*Scenario {
-	memoryStore, err := memory.NewStore("")
+	memoryStore, err := memory.NewStore()
 	if err != nil {
 		t.Fatal("failed to create store:", err.Error())
 	}
-	sqliteStore, err := sql.NewStore("sqlite", t.TempDir()+"/"+testName+".db")
+	sqliteStore, err := sql.NewStore("sqlite", t.TempDir()+"/"+testName+".db", false)
+	if err != nil {
+		t.Fatal("failed to create store:", err.Error())
+	}
+	sqliteStoreWithCaching, err := sql.NewStore("sqlite", t.TempDir()+"/"+testName+"-with-caching.db", true)
 	if err != nil {
 		t.Fatal("failed to create store:", err.Error())
 	}
@@ -105,6 +111,10 @@ func initStoresAndBaseScenarios(t *testing.T, testName string) []*Scenario {
 		{
 			Name:  "sqlite",
 			Store: sqliteStore,
+		},
+		{
+			Name:  "sqlite-with-caching",
+			Store: sqliteStoreWithCaching,
 		},
 	}
 }
@@ -122,6 +132,8 @@ func TestStore_GetEndpointStatusByKey(t *testing.T) {
 	firstResult.Timestamp = now.Add(-time.Minute)
 	secondResult := testUnsuccessfulResult
 	secondResult.Timestamp = now
+	thirdResult := testSuccessfulResult
+	thirdResult.Timestamp = now
 	for _, scenario := range scenarios {
 		t.Run(scenario.Name, func(t *testing.T) {
 			scenario.Store.Insert(&testEndpoint, &firstResult)
@@ -145,6 +157,14 @@ func TestStore_GetEndpointStatusByKey(t *testing.T) {
 			if endpointStatus.Results[0].Timestamp.After(endpointStatus.Results[1].Timestamp) {
 				t.Error("The result at index 0 should've been older than the result at index 1")
 			}
+			scenario.Store.Insert(&testEndpoint, &thirdResult)
+			endpointStatus, err = scenario.Store.GetEndpointStatusByKey(testEndpoint.Key(), paging.NewEndpointStatusParams().WithEvents(1, common.MaximumNumberOfEvents).WithResults(1, common.MaximumNumberOfResults))
+			if err != nil {
+				t.Fatal("shouldn't have returned an error, got", err.Error())
+			}
+			if len(endpointStatus.Results) != 3 {
+				t.Fatalf("endpointStatus.Results should've had 3 entries")
+			}
 			scenario.Store.Clear()
 		})
 	}
@@ -157,21 +177,21 @@ func TestStore_GetEndpointStatusForMissingStatusReturnsNil(t *testing.T) {
 		t.Run(scenario.Name, func(t *testing.T) {
 			scenario.Store.Insert(&testEndpoint, &testSuccessfulResult)
 			endpointStatus, err := scenario.Store.GetEndpointStatus("nonexistantgroup", "nonexistantname", paging.NewEndpointStatusParams().WithEvents(1, common.MaximumNumberOfEvents).WithResults(1, common.MaximumNumberOfResults))
-			if err != common.ErrEndpointNotFound {
+			if !errors.Is(err, common.ErrEndpointNotFound) {
 				t.Error("should've returned ErrEndpointNotFound, got", err)
 			}
 			if endpointStatus != nil {
 				t.Errorf("Returned endpoint status for group '%s' and name '%s' not nil after inserting the endpoint into the store", testEndpoint.Group, testEndpoint.Name)
 			}
 			endpointStatus, err = scenario.Store.GetEndpointStatus(testEndpoint.Group, "nonexistantname", paging.NewEndpointStatusParams().WithEvents(1, common.MaximumNumberOfEvents).WithResults(1, common.MaximumNumberOfResults))
-			if err != common.ErrEndpointNotFound {
+			if !errors.Is(err, common.ErrEndpointNotFound) {
 				t.Error("should've returned ErrEndpointNotFound, got", err)
 			}
 			if endpointStatus != nil {
 				t.Errorf("Returned endpoint status for group '%s' and name '%s' not nil after inserting the endpoint into the store", testEndpoint.Group, "nonexistantname")
 			}
 			endpointStatus, err = scenario.Store.GetEndpointStatus("nonexistantgroup", testEndpoint.Name, paging.NewEndpointStatusParams().WithEvents(1, common.MaximumNumberOfEvents).WithResults(1, common.MaximumNumberOfResults))
-			if err != common.ErrEndpointNotFound {
+			if !errors.Is(err, common.ErrEndpointNotFound) {
 				t.Error("should've returned ErrEndpointNotFound, got", err)
 			}
 			if endpointStatus != nil {
@@ -448,8 +468,8 @@ func TestStore_Insert(t *testing.T) {
 	secondResult.Timestamp = now
 	for _, scenario := range scenarios {
 		t.Run(scenario.Name, func(t *testing.T) {
-			scenario.Store.Insert(&testEndpoint, &testSuccessfulResult)
-			scenario.Store.Insert(&testEndpoint, &testUnsuccessfulResult)
+			scenario.Store.Insert(&testEndpoint, &firstResult)
+			scenario.Store.Insert(&testEndpoint, &secondResult)
 			ss, err := scenario.Store.GetEndpointStatusByKey(testEndpoint.Key(), paging.NewEndpointStatusParams().WithEvents(1, common.MaximumNumberOfEvents).WithResults(1, common.MaximumNumberOfResults))
 			if err != nil {
 				t.Error("shouldn't have returned an error, got", err)
@@ -463,7 +483,7 @@ func TestStore_Insert(t *testing.T) {
 			if len(ss.Results) != 2 {
 				t.Fatalf("Endpoint '%s' should've had 2 results, got %d", ss.Name, len(ss.Results))
 			}
-			for i, expectedResult := range []core.Result{testSuccessfulResult, testUnsuccessfulResult} {
+			for i, expectedResult := range []endpoint.Result{firstResult, secondResult} {
 				if expectedResult.HTTPStatus != ss.Results[i].HTTPStatus {
 					t.Errorf("Result at index %d should've had a HTTPStatus of %d, got %d", i, ss.Results[i].HTTPStatus, expectedResult.HTTPStatus)
 				}
@@ -520,25 +540,25 @@ func TestStore_Insert(t *testing.T) {
 func TestStore_DeleteAllEndpointStatusesNotInKeys(t *testing.T) {
 	scenarios := initStoresAndBaseScenarios(t, "TestStore_DeleteAllEndpointStatusesNotInKeys")
 	defer cleanUp(scenarios)
-	firstEndpoint := core.Endpoint{Name: "endpoint-1", Group: "group"}
-	secondEndpoint := core.Endpoint{Name: "endpoint-2", Group: "group"}
-	result := &testSuccessfulResult
+	firstEndpoint := endpoint.Endpoint{Name: "endpoint-1", Group: "group"}
+	secondEndpoint := endpoint.Endpoint{Name: "endpoint-2", Group: "group"}
+	r := &testSuccessfulResult
 	for _, scenario := range scenarios {
 		t.Run(scenario.Name, func(t *testing.T) {
-			scenario.Store.Insert(&firstEndpoint, result)
-			scenario.Store.Insert(&secondEndpoint, result)
+			scenario.Store.Insert(&firstEndpoint, r)
+			scenario.Store.Insert(&secondEndpoint, r)
 			if ss, _ := scenario.Store.GetEndpointStatusByKey(firstEndpoint.Key(), paging.NewEndpointStatusParams()); ss == nil {
-				t.Fatal("firstEndpoint should exist")
+				t.Fatal("firstEndpoint should exist, got", ss)
 			}
 			if ss, _ := scenario.Store.GetEndpointStatusByKey(secondEndpoint.Key(), paging.NewEndpointStatusParams()); ss == nil {
-				t.Fatal("secondEndpoint should exist")
+				t.Fatal("secondEndpoint should exist, got", ss)
 			}
 			scenario.Store.DeleteAllEndpointStatusesNotInKeys([]string{firstEndpoint.Key()})
 			if ss, _ := scenario.Store.GetEndpointStatusByKey(firstEndpoint.Key(), paging.NewEndpointStatusParams()); ss == nil {
-				t.Error("secondEndpoint should've been deleted")
+				t.Error("secondEndpoint should still exist, got", ss)
 			}
 			if ss, _ := scenario.Store.GetEndpointStatusByKey(secondEndpoint.Key(), paging.NewEndpointStatusParams()); ss != nil {
-				t.Error("firstEndpoint should still exist")
+				t.Error("firstEndpoint should have been deleted, got", ss)
 			}
 			// Delete everything
 			scenario.Store.DeleteAllEndpointStatusesNotInKeys([]string{})
@@ -558,6 +578,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestInitialize(t *testing.T) {
+	dir := t.TempDir()
 	type Scenario struct {
 		Name        string
 		Cfg         *storage.Config
@@ -579,11 +600,6 @@ func TestInitialize(t *testing.T) {
 			Cfg:         &storage.Config{Type: storage.TypeMemory},
 			ExpectedErr: nil,
 		},
-		{ // XXX: Remove for v4.0.0. See https://github.com/TwiN/gatus/issues/198
-			Name:        "memory-with-path",
-			Cfg:         &storage.Config{Type: storage.TypeMemory, Path: t.TempDir() + "/TestInitialize_memory-with-path.db"},
-			ExpectedErr: nil,
-		},
 		{
 			Name:        "sqlite-no-path",
 			Cfg:         &storage.Config{Type: storage.TypeSQLite},
@@ -591,7 +607,7 @@ func TestInitialize(t *testing.T) {
 		},
 		{
 			Name:        "sqlite-with-path",
-			Cfg:         &storage.Config{Type: storage.TypeSQLite, Path: t.TempDir() + "/TestInitialize_sqlite-with-path.db"},
+			Cfg:         &storage.Config{Type: storage.TypeSQLite, Path: filepath.Join(dir, "TestInitialize_sqlite-with-path.db")},
 			ExpectedErr: nil,
 		},
 	}
@@ -616,7 +632,7 @@ func TestInitialize(t *testing.T) {
 			store.Close()
 			// Try to initialize it again
 			err = Initialize(scenario.Cfg)
-			if err != scenario.ExpectedErr {
+			if !errors.Is(err, scenario.ExpectedErr) {
 				t.Errorf("expected %v, got %v", scenario.ExpectedErr, err)
 				return
 			}
@@ -626,7 +642,7 @@ func TestInitialize(t *testing.T) {
 }
 
 func TestAutoSave(t *testing.T) {
-	file := t.TempDir() + "/TestAutoSave.db"
+	file := filepath.Join(t.TempDir(), "/TestAutoSave.db")
 	if err := Initialize(&storage.Config{Path: file}); err != nil {
 		t.Fatal("shouldn't have returned an error")
 	}

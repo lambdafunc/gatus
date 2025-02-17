@@ -1,6 +1,6 @@
 <template>
   <router-link to="../"
-               class="absolute top-2 left-2 inline-block px-2 pb-0.5 text-lg text-black bg-gray-100 rounded hover:bg-gray-200 focus:outline-none border border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-500 dark:hover:bg-gray-600">
+               class="absolute top-2 left-5 inline-block px-2 pb-0.5 text-sm text-black bg-gray-100 rounded hover:bg-gray-200 focus:outline-none border border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-500 dark:hover:bg-gray-600">
     &larr;
   </router-link>
   <div>
@@ -21,64 +21,82 @@
       <hr/>
       <div class="flex space-x-4 text-center text-2xl mt-6 relative bottom-2 mb-10">
         <div class="flex-1">
+          <h2 class="text-sm text-gray-400 mb-1">Last 30 days</h2>
+          <img :src="generateUptimeBadgeImageURL('30d')" alt="30d uptime badge" class="mx-auto"/>
+        </div>
+        <div class="flex-1">
           <h2 class="text-sm text-gray-400 mb-1">Last 7 days</h2>
-          <img :src="generateUptimeBadgeImageURL('7d')" alt="7d uptime badge" class="mx-auto" />
+          <img :src="generateUptimeBadgeImageURL('7d')" alt="7d uptime badge" class="mx-auto"/>
         </div>
         <div class="flex-1">
           <h2 class="text-sm text-gray-400 mb-1">Last 24 hours</h2>
-          <img :src="generateUptimeBadgeImageURL('24h')" alt="24h uptime badge" class="mx-auto" />
+          <img :src="generateUptimeBadgeImageURL('24h')" alt="24h uptime badge" class="mx-auto"/>
         </div>
         <div class="flex-1">
           <h2 class="text-sm text-gray-400 mb-1">Last hour</h2>
-          <img :src="generateUptimeBadgeImageURL('1h')" alt="1h uptime badge" class="mx-auto" />
+          <img :src="generateUptimeBadgeImageURL('1h')" alt="1h uptime badge" class="mx-auto"/>
         </div>
       </div>
     </div>
-    <div v-if="endpointStatus && endpointStatus.key" class="mt-12">
-      <h1 class="text-xl xl:text-3xl font-mono text-gray-400">RESPONSE TIME</h1>
-      <hr/>
-      <img :src="generateResponseTimeChartImageURL()" alt="response time chart" class="mt-6" />
+    <div v-if="endpointStatus && endpointStatus.key && showResponseTimeChartAndBadges" class="mt-12">
+      <div class="flex items-center justify-between">
+        <h1 class="text-xl xl:text-3xl font-mono text-gray-400">RESPONSE TIME</h1>
+        <select v-model="selectedChartDuration"  class="text-sm bg-gray-400 text-white border border-gray-600 rounded-md px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="24h">24 hours</option>
+          <option value="7d">7 days</option>
+          <option value="30d">30 days</option>
+        </select>
+      </div>
+      <img :src="generateResponseTimeChartImageURL(selectedChartDuration)" alt="response time chart" class="mt-6"/>
       <div class="flex space-x-4 text-center text-2xl mt-6 relative bottom-2 mb-10">
         <div class="flex-1">
+          <h2 class="text-sm text-gray-400 mb-1">Last 30 days</h2>
+          <img :src="generateResponseTimeBadgeImageURL('30d')" alt="7d response time badge" class="mx-auto mt-2"/>
+        </div>
+        <div class="flex-1">
           <h2 class="text-sm text-gray-400 mb-1">Last 7 days</h2>
-          <img :src="generateResponseTimeBadgeImageURL('7d')" alt="7d response time badge" class="mx-auto mt-2" />
+          <img :src="generateResponseTimeBadgeImageURL('7d')" alt="7d response time badge" class="mx-auto mt-2"/>
         </div>
         <div class="flex-1">
           <h2 class="text-sm text-gray-400 mb-1">Last 24 hours</h2>
-          <img :src="generateResponseTimeBadgeImageURL('24h')" alt="24h response time badge" class="mx-auto mt-2" />
+          <img :src="generateResponseTimeBadgeImageURL('24h')" alt="24h response time badge" class="mx-auto mt-2"/>
         </div>
         <div class="flex-1">
           <h2 class="text-sm text-gray-400 mb-1">Last hour</h2>
-          <img :src="generateResponseTimeBadgeImageURL('1h')" alt="1h response time badge" class="mx-auto mt-2" />
+          <img :src="generateResponseTimeBadgeImageURL('1h')" alt="1h response time badge" class="mx-auto mt-2"/>
+        </div>
+      </div>
+    </div>
+    <div v-if="endpointStatus && endpointStatus.key">
+      <h1 class="text-xl xl:text-3xl font-mono text-gray-400 mt-4">CURRENT HEALTH</h1>
+      <hr />
+      <div class="flex space-x-4 text-center text-2xl mt-6 relative bottom-2 mb-10">
+        <div class="flex-1">
+          <img :src="generateHealthBadgeImageURL()" alt="health badge" class="mx-auto"/>
         </div>
       </div>
     </div>
     <div v-if="endpointStatus && endpointStatus.key">
       <h1 class="text-xl xl:text-3xl font-mono text-gray-400 mt-4">EVENTS</h1>
-      <hr class="mb-4"/>
-      <div>
-        <slot v-for="event in events" :key="event">
-          <div class="p-3 my-4">
-            <h2 class="text-lg">
-              <img v-if="event.type === 'HEALTHY'" src="../assets/arrow-up-green.png" alt="Healthy"
-                   class="border border-green-600 rounded-full opacity-75 bg-green-100 mr-2 inline" width="26"/>
-              <img v-else-if="event.type === 'UNHEALTHY'" src="../assets/arrow-down-red.png" alt="Unhealthy"
-                   class="border border-red-500 rounded-full opacity-75 bg-red-100 mr-2 inline" width="26"/>
-              <img v-else-if="event.type === 'START'" src="../assets/arrow-right-black.png" alt="Start"
-                   class="border border-gray-500 rounded-full opacity-75 bg-gray-100 mr-2 inline" width="26"/>
-              {{ event.fancyText }}
-            </h2>
-            <div class="flex mt-1 text-sm text-gray-400">
-              <div class="flex-1 text-left pl-10">
-                {{ new Date(event.timestamp).toISOString() }}
-              </div>
-              <div class="flex-1 text-right">
-                {{ event.fancyTimeAgo }}
-              </div>
+      <hr />
+      <ul role="list" class="px-0 xl:px-24 divide-y divide-gray-200 dark:divide-gray-600">
+        <li v-for="event in events" :key="event" class="p-3 my-4">
+          <h2 class="text-sm sm:text-lg">
+            <ArrowUpCircleIcon v-if="event.type === 'HEALTHY'" class="w-8 inline mr-2 text-green-600" />
+            <ArrowDownCircleIcon v-else-if="event.type === 'UNHEALTHY'" class="w-8 inline mr-2 text-red-500" />
+            <PlayCircleIcon v-else-if="event.type === 'START'" class="w-8 inline mr-2 text-gray-400 dark:text-gray-100" />
+            {{ event.fancyText }}
+          </h2>
+          <div class="flex mt-1 text-xs sm:text-sm text-gray-400">
+            <div class="flex-2 text-left pl-12">
+              {{ prettifyTimestamp(event.timestamp) }}
+            </div>
+            <div class="flex-1 text-right">
+              {{ event.fancyTimeAgo }}
             </div>
           </div>
-        </slot>
-      </div>
+        </li>
+      </ul>
     </div>
   </div>
   <Settings @refreshData="fetchData"/>
@@ -91,6 +109,7 @@ import Endpoint from '@/components/Endpoint.vue';
 import {SERVER_URL} from "@/main.js";
 import {helper} from "@/mixins/helper.js";
 import Pagination from "@/components/Pagination";
+import { ArrowDownCircleIcon, ArrowUpCircleIcon, PlayCircleIcon } from '@heroicons/vue/20/solid'
 
 export default {
   name: 'Details',
@@ -98,6 +117,9 @@ export default {
     Pagination,
     Endpoint,
     Settings,
+    ArrowDownCircleIcon,
+    ArrowUpCircleIcon,
+    PlayCircleIcon
   },
   emits: ['showTooltip'],
   mixins: [helper],
@@ -105,11 +127,11 @@ export default {
     fetchData() {
       //console.log("[Details][fetchData] Fetching data");
       fetch(`${this.serverUrl}/api/v1/endpoints/${this.$route.params.key}/statuses?page=${this.currentPage}`, {credentials: 'include'})
-          .then(response => response.json())
-          .then(data => {
+      .then(response => {
+        if (response.status === 200) {
+          response.json().then(data => {
             if (JSON.stringify(this.endpointStatus) !== JSON.stringify(data)) {
               this.endpointStatus = data;
-              this.uptime = data.uptime;
               let events = [];
               for (let i = data.events.length - 1; i >= 0; i--) {
                 let event = data.events[i];
@@ -127,7 +149,7 @@ export default {
                     event.fancyText = 'Endpoint became healthy';
                   } else if (event.type === 'UNHEALTHY') {
                     if (nextEvent) {
-                      event.fancyText = 'Endpoint was unhealthy for ' + this.prettifyTimeDifference(nextEvent.timestamp, event.timestamp);
+                      event.fancyText = 'Endpoint was unhealthy for ' + this.generatePrettyTimeDifference(nextEvent.timestamp, event.timestamp);
                     } else {
                       event.fancyText = 'Endpoint became unhealthy';
                     }
@@ -139,8 +161,26 @@ export default {
                 events.push(event);
               }
               this.events = events;
+              // Check if there's any non-0 response time data
+              // If there isn't, it's likely an external endpoint, which means we should
+              // hide the response time chart and badges
+              for (let i = 0; i < data.results.length; i++) {
+                if (data.results[i].duration > 0) {
+                  this.showResponseTimeChartAndBadges = true;
+                  break;
+                }
+              }
             }
           });
+        } else {
+          response.text().then(text => {
+            console.log(`[Details][fetchData] Error: ${text}`);
+          });
+        }
+      });
+    },
+    generateHealthBadgeImageURL() {
+      return `${this.serverUrl}/api/v1/endpoints/${this.endpointStatus.key}/health/badge.svg`;
     },
     generateUptimeBadgeImageURL(duration) {
       return `${this.serverUrl}/api/v1/endpoints/${this.endpointStatus.key}/uptimes/${duration}/badge.svg`;
@@ -148,18 +188,8 @@ export default {
     generateResponseTimeBadgeImageURL(duration) {
       return `${this.serverUrl}/api/v1/endpoints/${this.endpointStatus.key}/response-times/${duration}/badge.svg`;
     },
-    generateResponseTimeChartImageURL() {
-      return `${this.serverUrl}/api/v1/endpoints/${this.endpointStatus.key}/response-times/24h/chart.svg`;
-    },
-    prettifyUptime(uptime) {
-      if (!uptime) {
-        return '0%';
-      }
-      return (uptime * 100).toFixed(2) + '%'
-    },
-    prettifyTimeDifference(start, end) {
-      let minutes = Math.ceil((new Date(start) - new Date(end)) / 1000 / 60);
-      return minutes + (minutes === 1 ? ' minute' : ' minutes');
+    generateResponseTimeChartImageURL(duration) {
+      return `${this.serverUrl}/api/v1/endpoints/${this.endpointStatus.key}/response-times/${duration}/chart.svg`;
     },
     changePage(page) {
       this.currentPage = page;
@@ -175,13 +205,14 @@ export default {
   data() {
     return {
       endpointStatus: {},
-      uptime: {},
       events: [],
       hourlyAverageResponseTime: {},
+      selectedChartDuration: '24h',
       // Since this page isn't at the root, we need to modify the server URL a bit
       serverUrl: SERVER_URL === '.' ? '..' : SERVER_URL,
       currentPage: 1,
       showAverageResponseTime: true,
+      showResponseTimeChartAndBadges: false,
       chartLabels: [],
       chartValues: [],
     }

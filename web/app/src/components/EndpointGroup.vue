@@ -2,12 +2,14 @@
   <div :class="endpoints.length === 0 ? 'mt-3' : 'mt-4'">
     <slot v-if="name !== 'undefined'">
       <div class="endpoint-group pt-2 border dark:bg-gray-800 dark:border-gray-500" @click="toggleGroup">
-        <h5 class='font-mono text-gray-400 text-xl font-medium pb-2 px-3 dark:text-gray-200 dark:hover:text-gray-500 dark:border-gray-500'>
-          <span v-if="healthy" class='text-green-600'>&#10003;</span>
-          <span v-else class='text-yellow-400'>~</span>
-          {{ name }}
-          <span class='float-right endpoint-group-arrow'>
+        <h5 class="font-mono text-gray-400 text-xl font-medium pb-2 px-3 dark:text-gray-200 dark:hover:text-gray-500 dark:border-gray-500">
+          <span class="endpoint-group-arrow mr-2">
             {{ collapsed ? '&#9660;' : '&#9650;' }}
+          </span>
+          {{ name }}
+          <span v-if="unhealthyCount" class="rounded-xl bg-red-600 text-white px-2 font-bold leading-6 float-right h-6 text-center hover:scale-110 text-sm" title="Partial Outage">{{unhealthyCount}}</span>
+          <span v-else class="float-right text-green-600 w-7 hover:scale-110" title="Operational">
+            <CheckCircleIcon />
           </span>
         </h5>
       </div>
@@ -28,11 +30,13 @@
 
 <script>
 import Endpoint from './Endpoint.vue';
+import { CheckCircleIcon } from '@heroicons/vue/20/solid'
 
 export default {
   name: 'EndpointGroup',
   components: {
-    Endpoint
+    Endpoint,
+    CheckCircleIcon
   },
   props: {
     name: String,
@@ -42,27 +46,21 @@ export default {
   emits: ['showTooltip', 'toggleShowAverageResponseTime'],
   methods: {
     healthCheck() {
+      let unhealthyCount = 0
       if (this.endpoints) {
         for (let i in this.endpoints) {
-          for (let j in this.endpoints[i].results) {
-            if (!this.endpoints[i].results[j].success) {
-              // Set the endpoint group to unhealthy (only if it's currently healthy)
-              if (this.healthy) {
-                this.healthy = false;
-              }
-              return;
+          if (this.endpoints[i].results && this.endpoints[i].results.length > 0) {
+            if (!this.endpoints[i].results[this.endpoints[i].results.length-1].success) {
+              unhealthyCount++
             }
           }
         }
       }
-      // Set the endpoint group to healthy (only if it's currently unhealthy)
-      if (!this.healthy) {
-        this.healthy = true;
-      }
+      this.unhealthyCount = unhealthyCount;
     },
     toggleGroup() {
       this.collapsed = !this.collapsed;
-      sessionStorage.setItem(`gatus:endpoint-group:${this.name}:collapsed`, this.collapsed);
+      localStorage.setItem(`gatus:endpoint-group:${this.name}:collapsed`, this.collapsed);
     },
     showTooltip(result, event) {
       this.$emit('showTooltip', result, event);
@@ -81,8 +79,8 @@ export default {
   },
   data() {
     return {
-      healthy: true,
-      collapsed: sessionStorage.getItem(`gatus:endpoint-group:${this.name}:collapsed`) === "true"
+      unhealthyCount: 0,
+      collapsed: localStorage.getItem(`gatus:endpoint-group:${this.name}:collapsed`) === "true"
     }
   }
 }

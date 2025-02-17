@@ -1,38 +1,21 @@
 package memory
 
 import (
-	"encoding/gob"
-	"io/fs"
-	"log"
-	"os"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/TwiN/gatus/v3/core"
-	"github.com/TwiN/gatus/v3/storage/store/common"
-	"github.com/TwiN/gatus/v3/storage/store/common/paging"
-	"github.com/TwiN/gatus/v3/util"
-	"github.com/TwiN/gocache"
+	"github.com/TwiN/gatus/v5/alerting/alert"
+	"github.com/TwiN/gatus/v5/config/endpoint"
+	"github.com/TwiN/gatus/v5/storage/store/common"
+	"github.com/TwiN/gatus/v5/storage/store/common/paging"
+	"github.com/TwiN/gocache/v2"
 )
-
-func init() {
-	gob.Register(&core.EndpointStatus{})
-	gob.Register(&core.HourlyUptimeStatistics{})
-	gob.Register(&core.Uptime{})
-	gob.Register(&core.Result{})
-	gob.Register(&core.Event{})
-}
 
 // Store that leverages gocache
 type Store struct {
 	sync.RWMutex
-	// Deprecated
-	//
-	// File persistence will no longer be supported as of v4.0.0
-	// XXX: Remove me in v4.0.0
-	file  string
+
 	cache *gocache.Cache
 }
 
@@ -40,42 +23,20 @@ type Store struct {
 //
 // This store holds everything in memory, and if the file parameter is not blank,
 // supports eventual persistence.
-func NewStore(file string) (*Store, error) {
+func NewStore() (*Store, error) {
 	store := &Store{
-		file:  file,
 		cache: gocache.NewCache().WithMaxSize(gocache.NoMaxSize),
-	}
-	// XXX: Remove the block below in v4.0.0 because persistence with the memory store will no longer be supported
-	// XXX: Make sure to also update gocache to v2.0.0
-	if len(file) > 0 {
-		_, err := store.cache.ReadFromFile(file)
-		if err != nil {
-			// XXX: Remove the block below in v4.0.0
-			if data, err2 := os.ReadFile(file); err2 == nil {
-				isFromOldVersion := strings.Contains(string(data), "*core.ServiceStatus")
-				if isFromOldVersion {
-					log.Println("WARNING: Couldn't read file due to recent change in v3.3.0, see https://github.com/TwiN/gatus/issues/191")
-					log.Println("WARNING: Will automatically rename old file to " + file + ".old and overwrite the current file")
-					if err = os.WriteFile(file+".old", data, fs.ModePerm); err != nil {
-						log.Println("WARNING: Tried my best to keep the old file, but it wasn't enough. Sorry, your file will be overwritten :(")
-					}
-					// Return the store regardless of whether there was an error or not
-					return store, nil
-				}
-			}
-			return nil, err
-		}
 	}
 	return store, nil
 }
 
-// GetAllEndpointStatuses returns all monitored core.EndpointStatus
-// with a subset of core.Result defined by the page and pageSize parameters
-func (s *Store) GetAllEndpointStatuses(params *paging.EndpointStatusParams) ([]*core.EndpointStatus, error) {
+// GetAllEndpointStatuses returns all monitored endpoint.Status
+// with a subset of endpoint.Result defined by the page and pageSize parameters
+func (s *Store) GetAllEndpointStatuses(params *paging.EndpointStatusParams) ([]*endpoint.Status, error) {
 	endpointStatuses := s.cache.GetAll()
-	pagedEndpointStatuses := make([]*core.EndpointStatus, 0, len(endpointStatuses))
+	pagedEndpointStatuses := make([]*endpoint.Status, 0, len(endpointStatuses))
 	for _, v := range endpointStatuses {
-		pagedEndpointStatuses = append(pagedEndpointStatuses, ShallowCopyEndpointStatus(v.(*core.EndpointStatus), params))
+		pagedEndpointStatuses = append(pagedEndpointStatuses, ShallowCopyEndpointStatus(v.(*endpoint.Status), params))
 	}
 	sort.Slice(pagedEndpointStatuses, func(i, j int) bool {
 		return pagedEndpointStatuses[i].Key < pagedEndpointStatuses[j].Key
@@ -84,17 +45,17 @@ func (s *Store) GetAllEndpointStatuses(params *paging.EndpointStatusParams) ([]*
 }
 
 // GetEndpointStatus returns the endpoint status for a given endpoint name in the given group
-func (s *Store) GetEndpointStatus(groupName, endpointName string, params *paging.EndpointStatusParams) (*core.EndpointStatus, error) {
-	return s.GetEndpointStatusByKey(util.ConvertGroupAndEndpointNameToKey(groupName, endpointName), params)
+func (s *Store) GetEndpointStatus(groupName, endpointName string, params *paging.EndpointStatusParams) (*endpoint.Status, error) {
+	return s.GetEndpointStatusByKey(endpoint.ConvertGroupAndEndpointNameToKey(groupName, endpointName), params)
 }
 
 // GetEndpointStatusByKey returns the endpoint status for a given key
-func (s *Store) GetEndpointStatusByKey(key string, params *paging.EndpointStatusParams) (*core.EndpointStatus, error) {
+func (s *Store) GetEndpointStatusByKey(key string, params *paging.EndpointStatusParams) (*endpoint.Status, error) {
 	endpointStatus := s.cache.GetValue(key)
 	if endpointStatus == nil {
 		return nil, common.ErrEndpointNotFound
 	}
-	return ShallowCopyEndpointStatus(endpointStatus.(*core.EndpointStatus), params), nil
+	return ShallowCopyEndpointStatus(endpointStatus.(*endpoint.Status), params), nil
 }
 
 // GetUptimeByKey returns the uptime percentage during a time range
@@ -103,7 +64,7 @@ func (s *Store) GetUptimeByKey(key string, from, to time.Time) (float64, error) 
 		return 0, common.ErrInvalidTimeRange
 	}
 	endpointStatus := s.cache.GetValue(key)
-	if endpointStatus == nil || endpointStatus.(*core.EndpointStatus).Uptime == nil {
+	if endpointStatus == nil || endpointStatus.(*endpoint.Status).Uptime == nil {
 		return 0, common.ErrEndpointNotFound
 	}
 	successfulExecutions := uint64(0)
@@ -111,7 +72,7 @@ func (s *Store) GetUptimeByKey(key string, from, to time.Time) (float64, error) 
 	current := from
 	for to.Sub(current) >= 0 {
 		hourlyUnixTimestamp := current.Truncate(time.Hour).Unix()
-		hourlyStats := endpointStatus.(*core.EndpointStatus).Uptime.HourlyStatistics[hourlyUnixTimestamp]
+		hourlyStats := endpointStatus.(*endpoint.Status).Uptime.HourlyStatistics[hourlyUnixTimestamp]
 		if hourlyStats == nil || hourlyStats.TotalExecutions == 0 {
 			current = current.Add(time.Hour)
 			continue
@@ -132,14 +93,14 @@ func (s *Store) GetAverageResponseTimeByKey(key string, from, to time.Time) (int
 		return 0, common.ErrInvalidTimeRange
 	}
 	endpointStatus := s.cache.GetValue(key)
-	if endpointStatus == nil || endpointStatus.(*core.EndpointStatus).Uptime == nil {
+	if endpointStatus == nil || endpointStatus.(*endpoint.Status).Uptime == nil {
 		return 0, common.ErrEndpointNotFound
 	}
 	current := from
 	var totalExecutions, totalResponseTime uint64
 	for to.Sub(current) >= 0 {
 		hourlyUnixTimestamp := current.Truncate(time.Hour).Unix()
-		hourlyStats := endpointStatus.(*core.EndpointStatus).Uptime.HourlyStatistics[hourlyUnixTimestamp]
+		hourlyStats := endpointStatus.(*endpoint.Status).Uptime.HourlyStatistics[hourlyUnixTimestamp]
 		if hourlyStats == nil || hourlyStats.TotalExecutions == 0 {
 			current = current.Add(time.Hour)
 			continue
@@ -160,14 +121,14 @@ func (s *Store) GetHourlyAverageResponseTimeByKey(key string, from, to time.Time
 		return nil, common.ErrInvalidTimeRange
 	}
 	endpointStatus := s.cache.GetValue(key)
-	if endpointStatus == nil || endpointStatus.(*core.EndpointStatus).Uptime == nil {
+	if endpointStatus == nil || endpointStatus.(*endpoint.Status).Uptime == nil {
 		return nil, common.ErrEndpointNotFound
 	}
 	hourlyAverageResponseTimes := make(map[int64]int)
 	current := from
 	for to.Sub(current) >= 0 {
 		hourlyUnixTimestamp := current.Truncate(time.Hour).Unix()
-		hourlyStats := endpointStatus.(*core.EndpointStatus).Uptime.HourlyStatistics[hourlyUnixTimestamp]
+		hourlyStats := endpointStatus.(*endpoint.Status).Uptime.HourlyStatistics[hourlyUnixTimestamp]
 		if hourlyStats == nil || hourlyStats.TotalExecutions == 0 {
 			current = current.Add(time.Hour)
 			continue
@@ -179,24 +140,24 @@ func (s *Store) GetHourlyAverageResponseTimeByKey(key string, from, to time.Time
 }
 
 // Insert adds the observed result for the specified endpoint into the store
-func (s *Store) Insert(endpoint *core.Endpoint, result *core.Result) error {
-	key := endpoint.Key()
+func (s *Store) Insert(ep *endpoint.Endpoint, result *endpoint.Result) error {
+	key := ep.Key()
 	s.Lock()
 	status, exists := s.cache.Get(key)
 	if !exists {
-		status = core.NewEndpointStatus(endpoint.Group, endpoint.Name)
-		status.(*core.EndpointStatus).Events = append(status.(*core.EndpointStatus).Events, &core.Event{
-			Type:      core.EventStart,
+		status = endpoint.NewStatus(ep.Group, ep.Name)
+		status.(*endpoint.Status).Events = append(status.(*endpoint.Status).Events, &endpoint.Event{
+			Type:      endpoint.EventStart,
 			Timestamp: time.Now(),
 		})
 	}
-	AddResult(status.(*core.EndpointStatus), result)
+	AddResult(status.(*endpoint.Status), result)
 	s.cache.Set(key, status)
 	s.Unlock()
 	return nil
 }
 
-// DeleteAllEndpointStatusesNotInKeys removes all EndpointStatus that are not within the keys provided
+// DeleteAllEndpointStatusesNotInKeys removes all Status that are not within the keys provided
 func (s *Store) DeleteAllEndpointStatusesNotInKeys(keys []string) int {
 	var keysToDelete []string
 	for _, existingKey := range s.cache.GetKeysByPattern("*", 0) {
@@ -214,6 +175,37 @@ func (s *Store) DeleteAllEndpointStatusesNotInKeys(keys []string) int {
 	return s.cache.DeleteAll(keysToDelete)
 }
 
+// GetTriggeredEndpointAlert returns whether the triggered alert for the specified endpoint as well as the necessary information to resolve it
+//
+// Always returns that the alert does not exist for the in-memory store since it does not support persistence across restarts
+func (s *Store) GetTriggeredEndpointAlert(ep *endpoint.Endpoint, alert *alert.Alert) (exists bool, resolveKey string, numberOfSuccessesInARow int, err error) {
+	return false, "", 0, nil
+}
+
+// UpsertTriggeredEndpointAlert inserts/updates a triggered alert for an endpoint
+// Used for persistence of triggered alerts across application restarts
+//
+// Does nothing for the in-memory store since it does not support persistence across restarts
+func (s *Store) UpsertTriggeredEndpointAlert(ep *endpoint.Endpoint, triggeredAlert *alert.Alert) error {
+	return nil
+}
+
+// DeleteTriggeredEndpointAlert deletes a triggered alert for an endpoint
+//
+// Does nothing for the in-memory store since it does not support persistence across restarts
+func (s *Store) DeleteTriggeredEndpointAlert(ep *endpoint.Endpoint, triggeredAlert *alert.Alert) error {
+	return nil
+}
+
+// DeleteAllTriggeredAlertsNotInChecksumsByEndpoint removes all triggered alerts owned by an endpoint whose alert
+// configurations are not provided in the checksums list.
+// This prevents triggered alerts that have been removed or modified from lingering in the database.
+//
+// Does nothing for the in-memory store since it does not support persistence across restarts
+func (s *Store) DeleteAllTriggeredAlertsNotInChecksumsByEndpoint(ep *endpoint.Endpoint, checksums []string) int {
+	return 0
+}
+
 // Clear deletes everything from the store
 func (s *Store) Clear() {
 	s.cache.Clear()
@@ -221,9 +213,6 @@ func (s *Store) Clear() {
 
 // Save persists the cache to the store file
 func (s *Store) Save() error {
-	if len(s.file) > 0 {
-		return s.cache.SaveToFile(s.file)
-	}
 	return nil
 }
 
